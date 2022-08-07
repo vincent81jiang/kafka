@@ -1267,6 +1267,14 @@ class Log(@volatile private var _dir: File,
             }
           }
 
+          // Re-validate assigned offsets for batches right before updating epoch cache or appending them to segment
+          var expectedNextBaseOffset = nextOffsetMetadata.messageOffset
+          validRecords.batches.forEach { batch =>
+            assert(expectedNextBaseOffset <= batch.baseOffset && batch.baseOffset <= batch.lastOffset)
+            expectedNextBaseOffset = batch.lastOffset + 1
+          }
+          assert(expectedNextBaseOffset == appendInfo.lastOffset + 1)
+
           // update the epoch cache with the epoch stamped onto the message by the leader
           validRecords.batches.forEach { batch =>
             if (batch.magic >= RecordBatch.MAGIC_VALUE_V2) {
