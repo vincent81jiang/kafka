@@ -1267,13 +1267,19 @@ class Log(@volatile private var _dir: File,
             }
           }
 
-          // Re-validate assigned offsets for batches right before updating epoch cache or appending them to segment
+          // Re-validate assigned offsets for batches before updating epoch cache or appending them to segment
           var expectedNextBaseOffset = nextOffsetMetadata.messageOffset
           validRecords.batches.forEach { batch =>
-            assert(expectedNextBaseOffset <= batch.baseOffset && batch.baseOffset <= batch.lastOffset)
+            if (batch.baseOffset < expectedNextBaseOffset ||  batch.baseOffset > batch.lastOffset) {
+              // This is never expected to happen, but if assigned offsets are not monotonically increasing, throw
+              // KafkaStorageException which will mark the log dir as offline and further cause broker shutdown.
+              throw new KafkaStorageException(s"$topicPartition: validation of assigned offsets for $batch failed. expected next base offset: $expectedNextBaseOffset")
+            }
             expectedNextBaseOffset = batch.lastOffset + 1
           }
-          assert(expectedNextBaseOffset == appendInfo.lastOffset + 1)
+          if (appendInfo.lastOffset != expectedNextBaseOffset - 1) {
+            throw new KafkaStorageException(s"$topicPartition: appendInfo.lastOffset ${appendInfo.lastOffset} doesn't match last offset of last batch ${expectedNextBaseOffset - 1}")
+          }
 
           // update the epoch cache with the epoch stamped onto the message by the leader
           validRecords.batches.forEach { batch =>
